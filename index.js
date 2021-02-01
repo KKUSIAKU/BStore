@@ -1,0 +1,239 @@
+
+// furter memory allocation interface
+class Store {
+  constructor() {
+    this._BNodes = [];
+    this._size = 0;
+    this._freeIndexes = [];
+  }
+
+  get isEmpty() {
+    return !this._size
+  }
+
+  get size() {
+    return this._size
+  }
+
+  read(index) {
+    return this._BNodes[index]
+  }
+
+  write(index, data) {
+    this._BNodes[index] = data;
+    this._freeIndexes = this._freeIndexes.filter((i) => i !== index);
+    // console.log(this._freeIndexes);
+    this._size += 1;
+  }
+
+  getIndex() {
+    let index = this._freeIndexes.shift();
+    if(!index) {
+      index = Date.now()
+      this._freeIndexes.push(index)
+    } 
+    return index;
+  }
+
+  put(data) {
+    const index = this.getIndex(); 
+    this._BNodes[index] = data;
+    return index;
+  }
+
+  remove(index) {
+    this._BNodes[index] = null;
+    this._freeIndexes.push(index);
+    this._size -= 1;
+  }
+}
+
+
+class TreeNode {
+  constructor(value, size, getSetter) {
+    this.children = [];
+    this._size = size || 2;
+    this.id = null;
+    this.keys = new Array(2*(this._size || 2 )).fill(null);
+  }
+  get isRoot() {
+    return !this.parent;
+  }
+
+  get isLeaf() {
+    return !this.children.length
+  }
+
+  get isFull() {
+    return this.keys.filter((key) => key).length == 2 * this._size - 1
+  }
+
+  get isOverFull() {
+    return this.keys.filter((key) => key).length == 2 * this._size
+  }
+
+  set id(value){
+    this._id = value;
+  }
+
+  get id(){
+    return this._id;
+  }
+
+  addChildBNode(index) {
+    if (this.isFull) {
+      throw RangeError('BNode is full')
+    }
+    this.children.push(index)
+   
+  }
+
+  addKeys(key) {
+    if(!key) {
+      throw TypeError('Key could not be undenifed')
+    }
+
+    let index = this.keys.findIndex((_key) => _key > key);
+    if (index >= 0){
+      let preIndex = this.keys.slice(0, index).push(key);
+      let prostIndex = this.keys.slice(index)
+      this.keys = preIndex.concat(prostIndex)
+    } else {
+      index = this.keys.findIndex((_key) => !_key);
+      this.keys[index] = key
+    }
+  }
+
+  append(value) {
+    if(this.isOverFull){
+      throw RangeError('BNode is full')
+    } else {
+      this.addKeys(value)
+    }
+  }
+
+  // this will not clear the value in the store,
+  // use only after BNode content have been put in the store
+  clear() {
+    this.value = null;
+  }
+
+  split() {
+    // TODO: deeply clone to check for next step
+    const newBNode = new TreeNode();
+    newBNode.children = this.children.slice(this._size);
+    newBNode.keys = this.keys.slice(this._size - 1);
+    this.children = this.children.slice(0,this._size);
+    this.keys = this.keys.slice(0,this._size - 1);
+    return newBNode;
+  }
+
+  getKey() {
+    return this.value
+  }
+
+  * [Symbol.iterator]() {
+    let index = 0;
+    while (index < this.children.length - 1) {
+      step = yield this.children[index];
+      if(step && step > index + 1) {
+        index = step;
+      } else {
+        index += 1;
+      }
+    }
+  }
+}
+
+
+class Tree {
+  constructor(dimension) {
+    this._store = new Store();
+    this._rootBNode = null;
+    this._dimension = dimension || 2;
+    this._size = 0;
+    this.inserRoot();
+  }
+
+  get size() {
+    return this._size;
+  }
+
+  insert(value) {
+      const newTreeNode = this.insertInTree(value, this._rootBNode.id)
+      if( newTreeNode) {        
+        const key = newTreeNode.keys.shift();
+        const newTreeNodeID = this._store.getIndex();
+        newTreeNode.id = newTreeNodeID; 
+        this._store.write(newTreeNode.id, newTreeNode);
+
+        const newRootNode = new TreeNode();
+        const newRootID = this._store.getIndex();
+        newRootNode.id = newRootID;
+        newRootNode.addKeys(key);
+        newRootNode.children.push(this._rootBNode.id, newTreeNode.id);
+        this._store.write(newRootNode.id, newRootNode);
+        this._rootBNode = newRootNode;
+      }
+      return true;
+  }
+
+  findInTree(value, BNode) {
+    let vIndex = BNode.keys.findIndex((key) => key >= value);
+
+    if(vIndex < 0) {
+      vIndex =  BNode.keys.findIndex((key) => !key);
+    }
+    return vIndex;
+  }
+
+  find(value) {
+    const id = this._rootBNode.id;
+    let BNode = this._store.read(id);
+    let keyIndex = this.findInTree(value, BNode);
+
+    while (BNode.keys[keyIndex] !== value && !BNode.isLeaf) {
+      BNode = this._store.read(BNode.children[keyIndex]);
+      keyIndex = this.findInTree(value, BNode)
+    }
+    console.log("============", keyIndex, BNode)
+    return BNode.keys[keyIndex];
+  }
+
+  insertInTree(value, BNodeId){
+    const BNode = this._store.read(BNodeId)
+    const index  = this.findInTree(value, BNode)
+    if(!BNode.children[index]) {
+      BNode.addKeys(value)
+      this._store.write(BNode.id, BNode);
+    } else {
+      let nextBNode = this.insertInTree(value, BNode.children[index]);
+      if(nextBNode) {
+        let key = nextBNode.keys.shift();
+        this._store.write(nextBNode.id, nextBNode)
+        BNode.addKeys(key)
+        this._store.write(BNode.ui, BNode)
+      }
+    }
+
+   if(BNode.isOverFull){
+     return BNode.split();
+   }
+
+    return null;
+  }
+
+  // should be not numerable 
+  inserRoot() {
+    this._rootBNode = new TreeNode();
+    const index = this._store.getIndex();
+    this._rootBNode.id = index;
+    this._store.write(this._rootBNode.id, this._rootBNode);
+  }
+}
+
+
+exports.TreeNode = TreeNode;
+exports.Tree = Tree;
+exports.Store = Store;
+module.exports = exports;
